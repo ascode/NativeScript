@@ -5,6 +5,9 @@ import * as utils from "../../utils/utils";
 
 export * from "./font-common";
 
+
+
+
 export class Font extends FontBase {
     public static default = new Font(undefined, undefined, FontStyle.NORMAL, FontWeight.NORMAL);
 
@@ -85,29 +88,112 @@ function getFontFamilyRespectingGenericFonts(fontFamily: string): string {
     }
 }
 
-function createUIFont(font: Font, defaultFont: UIFont) {
+function shouldUseSystemFont(fontFamily:string){
+    return !fontFamily || 
+        fontFamily === genericFontFamilies.sansSerif || 
+        fontFamily === genericFontFamilies.system;
+}
+
+function getSystemFont(font:Font, size:number): UIFont {
+    let result = UIFont.systemFontOfSizeWeight(size, getiOSFontWeight(font.fontWeight));
+        if (font.isItalic) {
+            console.log(`-------> Try to get italic for ${result}`)
+
+            let symbolicTraits: number = UIFontDescriptorSymbolicTraits.TraitItalic;
+            if (font.fontWeight === "bold" ||
+                font.fontWeight === "600" ||
+                font.fontWeight === "700" ||
+                font.fontWeight === "800" ||
+                font.fontWeight === "900") {
+                symbolicTraits |= UIFontDescriptorSymbolicTraits.TraitBold;
+            }
+
+            let descriptor = result.fontDescriptor.fontDescriptorWithSymbolicTraits(symbolicTraits);
+            result = UIFont.fontWithDescriptorSize(descriptor, size);
+        }
+
+        return result;
+}
+
+function createUIFontNEW(font: Font, defaultFont: UIFont): UIFont {
+    console.log(`---> createUIFont ff: ${font.fontFamily} italic: ${font.isItalic} weight: ${font.fontWeight} size: ${font.fontSize}`);
+
     let size = font.fontSize || defaultFont.pointSize;
-    let descriptor: UIFontDescriptor;
+    const fonts = parseFontFamily(font.fontFamily);
+    let fontFamily = fonts[0];
+    fontFamily = getFontFamilyRespectingGenericFonts(fontFamily);
+    console.log("FF: " + fontFamily);
 
-    let symbolicTraits: number = 0;
-    if (font.isBold) {
-        symbolicTraits |= UIFontDescriptorSymbolicTraits.TraitBold;
+    let result: UIFont;
+    if (shouldUseSystemFont(fontFamily)) {
+        result = getSystemFont(font, size);
+    } else {
+        let symbolicTraits: number = 0;
+        if (font.isBold) {
+            symbolicTraits |= UIFontDescriptorSymbolicTraits.TraitBold;
+        }
+        if (font.isItalic) {
+            symbolicTraits |= UIFontDescriptorSymbolicTraits.TraitItalic;
+        }
+
+        let fontAttributes = {
+            [UIFontDescriptorFamilyAttribute]: fontFamily,
+            // [UIFontDescriptorNameAttribute]: fontFamily,
+            [UIFontDescriptorTraitsAttribute]: {
+                [UIFontWeightTrait]: getiOSFontWeight(font.fontWeight),
+                [UIFontSymbolicTrait]: symbolicTraits
+            }
+        };
+
+        // console.dir(fontAttributes);
+
+        let descriptor = UIFontDescriptor.fontDescriptorWithFontAttributes(<any>fontAttributes);
+        result = UIFont.fontWithDescriptorSize(descriptor, size);
+
+        if (font.isItalic && !(result.fontDescriptor.symbolicTraits & UIFontDescriptorSymbolicTraits.TraitItalic)) {
+            console.log("----------> Wanted italic but didn't get one");
+
+            descriptor = descriptor.fontDescriptorWithMatrix(CGAffineTransformMake(1, 0, 0.2, 1, 0, 0));
+            result = UIFont.fontWithDescriptorSize(descriptor, size);
+        }
     }
-    if (font.isItalic) {
-        symbolicTraits |= UIFontDescriptorSymbolicTraits.TraitItalic;
-    }
 
-    descriptor = tryResolveWithSystemFont(font, size, symbolicTraits);
+    // if (!result) {
+    //     console.log(" ---- returning default font")
+    //     result = UIFont.systemFontOfSize(size);
+    // }
 
-    if (!descriptor) {
-        descriptor = tryResolveByFamily(font);
-    }
+    console.log(`-------> Resolved ${result}`)
 
-    if (!descriptor) {
-        descriptor = utils.ios.getter(defaultFont, defaultFont.fontDescriptor).fontDescriptorWithSymbolicTraits(symbolicTraits);
-    }
+    return result;
+}
 
-    return UIFont.fontWithDescriptorSize(descriptor, size);
+
+function createUIFont(font: Font, defaultFont: UIFont) {
+    return createUIFontNEW(font, defaultFont);
+
+    // let size = font.fontSize || defaultFont.pointSize;
+    // let descriptor: UIFontDescriptor;
+
+    // let symbolicTraits: number = 0;
+    // if (font.isBold) {
+    //     symbolicTraits |= UIFontDescriptorSymbolicTraits.TraitBold;
+    // }
+    // if (font.isItalic) {
+    //     symbolicTraits |= UIFontDescriptorSymbolicTraits.TraitItalic;
+    // }
+
+    // descriptor = tryResolveWithSystemFont(font, size, symbolicTraits);
+
+    // if (!descriptor) {
+    //     descriptor = tryResolveByFamily(font);
+    // }
+
+    // if (!descriptor) {
+    //     descriptor = utils.ios.getter(defaultFont, defaultFont.fontDescriptor).fontDescriptorWithSymbolicTraits(symbolicTraits);
+    // }
+
+    // return UIFont.fontWithDescriptorSize(descriptor, size);
 }
 
 function tryResolveWithSystemFont(font: Font, size: number, symbolicTraits: number): UIFontDescriptor {
@@ -116,21 +202,14 @@ function tryResolveWithSystemFont(font: Font, size: number, symbolicTraits: numb
     switch (font.fontFamily) {
         case genericFontFamilies.sansSerif:
         case genericFontFamilies.system:
-            if ((<any>UIFont).systemFontOfSizeWeight) {// This method is available on iOS 8.2 and later.
-                systemFont = (<any>UIFont).systemFontOfSizeWeight(size, getiOSFontWeight(font.fontWeight));
-            }
-            else {
-                systemFont = UIFont.systemFontOfSize(size);
-            }
+            systemFont = UIFont.systemFontOfSizeWeight(size, getiOSFontWeight(font.fontWeight));
             result = utils.ios.getter(systemFont, systemFont.fontDescriptor).fontDescriptorWithSymbolicTraits(symbolicTraits);
             break;
 
-        case genericFontFamilies.monospace:
-            if ((<any>UIFont).monospacedDigitSystemFontOfSizeWeight) {// This method is available on iOS 9.0 and later.
-                systemFont = (<any>UIFont).monospacedDigitSystemFontOfSizeWeight(size, getiOSFontWeight(font.fontWeight));
-                result = utils.ios.getter(systemFont, systemFont.fontDescriptor).fontDescriptorWithSymbolicTraits(symbolicTraits);
-            }
-            break;
+        // case genericFontFamilies.monospace:
+        // systemFont = UIFont.monospacedDigitSystemFontOfSizeWeight(size, getiOSFontWeight(font.fontWeight));
+        // result = utils.ios.getter(systemFont, systemFont.fontDescriptor).fontDescriptorWithSymbolicTraits(symbolicTraits);
+        //     break;
     }
 
     if (systemFont) {
@@ -142,6 +221,7 @@ function tryResolveWithSystemFont(font: Font, size: number, symbolicTraits: numb
 }
 
 function tryResolveByFamily(font: Font): UIFontDescriptor {
+    getFontFamilyRespectingGenericFonts(font.fontFamily);
     const fonts = parseFontFamily(font.fontFamily);
     let result: UIFontDescriptor = null;
     if (fonts.length === 0) {
@@ -189,21 +269,18 @@ declare const UIFontWeightHeavy: number;      //0.56
 declare const UIFontWeightBlack: number;      //0.62
 
 function getiOSFontWeight(fontWeight: FontWeight): number {
-    if (!(<any>UIFont).systemFontOfSizeWeight) {
-        throw new Error("Font weight is available in iOS 8.2 and later.");
-    }
-
     switch (fontWeight) {
         case FontWeight.THIN:
-            return UIFontWeightThin;
-        case FontWeight.EXTRA_LIGHT:
             return UIFontWeightUltraLight;
+        case FontWeight.EXTRA_LIGHT:
+            return UIFontWeightThin;
         case FontWeight.LIGHT:
             return UIFontWeightLight;
         case FontWeight.NORMAL:
         case "400":
         case undefined:
         case null:
+        case "normal":
             return UIFontWeightRegular;
         case FontWeight.MEDIUM:
             return UIFontWeightMedium;
